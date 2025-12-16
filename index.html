@@ -637,6 +637,14 @@
   let mpRunToken = 0; // 每次启动/重启递增，用于让旧循环自动退出
   let mpInitDone = false;
 
+  function isIOS() {
+    const ua = navigator.userAgent || "";
+    const iOS = /iPad|iPhone|iPod/.test(ua);
+    const iPadOS13Plus = (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    return iOS || iPadOS13Plus;
+  }
+
+
   async function setupMediaPipe() {
     // 初始化模型（只做一次）
     if (!mpInitDone) {
@@ -647,7 +655,7 @@
         baseOptions: {
           modelAssetPath:
             "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
-          delegate: "GPU",
+          delegate: isIOS() ? "CPU" : "GPU",
         },
         runningMode: "VIDEO",
         numHands: 1,
@@ -681,6 +689,8 @@
       });
 
       mpVideo.srcObject = mpStream;
+      // iOS：load() + play() 更稳
+      try { mpVideo.load(); } catch {}
 
       // iOS/部分安卓：需要 play() 才会真的开始
       await mpVideo.play().catch(() => {});
@@ -738,9 +748,37 @@
     restartBtn.onclick = async () => {
       const status = document.getElementById("status-text");
       status.innerText = "正在重启摄像头…";
+
+      // 先让旧的预测循环退出
+      mpRunToken++;
+
       await stopCameraStream();
       // 给浏览器一点时间释放资源（尤其是 iOS）
-      await new Promise((r) => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, 300));
+
+      // iOS 上更稳：重启时顺便重建 HandLandmarker（CPU delegate）
+      if (isIOS()) {
+        try {
+          status.innerText = "正在重建手势识别模型…";
+          const vision = await FilesetResolver.forVisionTasks(
+            "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
+          );
+          mpHandLandmarker = await HandLandmarker.createFromOptions(vision, {
+            baseOptions: {
+              modelAssetPath:
+                "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+              delegate: "CPU",
+            },
+            runningMode: "VIDEO",
+            numHands: 1,
+          });
+        } catch (e) {
+          console.error("重建 HandLandmarker 失败:", e);
+          status.innerText = "模型重建失败，尝试仅重启摄像头…";
+        }
+      }
+
+      status.innerText = "正在重新启动摄像头…";
       await startCameraStream();
     };
   }
