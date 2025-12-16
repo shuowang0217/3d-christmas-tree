@@ -634,6 +634,7 @@
   let mpVideo = null;
   let mpStream = null;
   let mpPredictRunning = false;
+  let mpRunToken = 0; // 每次启动/重启递增，用于让旧循环自动退出
   let mpInitDone = false;
 
   async function setupMediaPipe() {
@@ -706,11 +707,10 @@
       document.getElementById("loading").style.display = "none";
       status.innerText = "系统就绪，请伸手";
 
-      // 只启动一次预测循环
-      if (!mpPredictRunning) {
-        mpPredictRunning = true;
-        predictWebcam(mpHandLandmarker, mpVideo);
-      }
+      // 启动（或重启）预测循环：用 token 让旧循环自动退出，避免卡死后无法恢复
+      mpRunToken++;
+      mpPredictRunning = true;
+      predictWebcam(mpHandLandmarker, mpVideo, mpRunToken);
     } catch (err) {
       console.error("getUserMedia 失败:", err);
       status.innerText = "无法打开摄像头：请检查权限/浏览器设置";
@@ -752,8 +752,10 @@
   // ======================
   // 手势识别（手机端优化：降频，不要每帧都 detect）
   // ======================
-  async function predictWebcam(handLandmarker, video) {
-    const now = performance.now();
+  async function predictWebcam(handLandmarker, video, runToken) {
+    // 如果已经被重启，旧循环自动退出
+    if (typeof mpRunToken !== 'undefined' && runToken !== mpRunToken) return;
+const now = performance.now();
 
     // 约 15fps 做一次识别，摄像头预览更稳
     const SHOULD_DETECT = (now - lastDetectTs) >= 66;
@@ -780,7 +782,7 @@
       }
     }
 
-    requestAnimationFrame(() => predictWebcam(handLandmarker, video));
+    requestAnimationFrame(() => predictWebcam(handLandmarker, video, runToken));
   }
 
 function drawSkeleton(ctx, landmarks, w, h) { ctx.lineWidth = 3; ctx.strokeStyle = '#00ff88'; ctx.fillStyle = '#ff0044'; const connections = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]]; ctx.beginPath(); for (let i = 0; i < connections.length; i++) { const s = landmarks[connections[i][0]]; const e = landmarks[connections[i][1]]; ctx.moveTo(s.x * w, s.y * h); ctx.lineTo(e.x * w, e.y * h); } ctx.stroke(); for (let i = 0; i < landmarks.length; i++) { ctx.beginPath(); ctx.arc(landmarks[i].x * w, landmarks[i].y * h, 4, 0, Math.PI * 2); ctx.fill(); } }
