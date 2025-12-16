@@ -155,6 +155,8 @@
     }
     #fullscreen-btn { right: 200px; }
     #camera-btn { right: 145px; }
+    #restart-camera-btn { right: 90px; }
+
 
     .hide-ui #ui-layer, .hide-ui #upload-btn { opacity: 0; pointer-events: none; }
     .hide-ui #loading { opacity: 0; pointer-events: none; }
@@ -183,6 +185,7 @@
     </div>
 
     <button id="camera-btn" class="control-btn" title="显示/隐藏摄像头预览">📷</button>
+    <button id="restart-camera-btn" class="control-btn" title="重启摄像头（卡住时点这里）">🔄</button>
     <button id="fullscreen-btn" class="control-btn" title="切换沉浸模式">⛶</button>
 
     <div id="ui-layer">
@@ -623,10 +626,128 @@
     mainGroup.add(mesh);
   }
 
-async function setupMediaPipe() { const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"); const handLandmarker = await HandLandmarker.createFromOptions(vision, { baseOptions: { modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`, delegate: "GPU" }, runningMode: "VIDEO", numHands: 1 }); const video = document.getElementById("input-video"); navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30, max: 30 } } }).then((stream) => { video.srcObject = stream; video.addEventListener("loadeddata", () => { document.getElementById('loading').style.display = 'none'; document.getElementById('status-text').innerText = "系统就绪，请伸手"; predictWebcam(handLandmarker, video); }); }); }
-  
+
+  // ======================
+  // MediaPipe + 摄像头（支持重启）
+  // ======================
+  let mpHandLandmarker = null;
+  let mpVideo = null;
+  let mpStream = null;
+  let mpPredictRunning = false;
+  let mpInitDone = false;
+
+  async function setupMediaPipe() {
+    // 初始化模型（只做一次）
+    if (!mpInitDone) {
+      const vision = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
+      );
+      mpHandLandmarker = await HandLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath:
+            "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+          delegate: "GPU",
+        },
+        runningMode: "VIDEO",
+        numHands: 1,
+      });
+      mpInitDone = true;
+    }
+
+    mpVideo = document.getElementById("input-video");
+
+    // 启动摄像头（如果已经有就先停掉）
+    await startCameraStream();
+  }
+
+  async function startCameraStream() {
+    const status = document.getElementById("status-text");
+
+    // 防止重复开启
+    await stopCameraStream();
+
+    status.innerText = "正在启动摄像头…";
+
+    try {
+      mpStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: "user",
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+          frameRate: { ideal: 30, max: 30 },
+        },
+        audio: false,
+      });
+
+      mpVideo.srcObject = mpStream;
+
+      // iOS/部分安卓：需要 play() 才会真的开始
+      await mpVideo.play().catch(() => {});
+
+      // 重置检测节拍
+      lastVideoTime = -1;
+      lastDetectTs = 0;
+
+      // loadeddata 可能只触发一次；这里用一个就绪检测更稳
+      const waitReady = async () => {
+        for (let i = 0; i < 80; i++) {
+          if (mpVideo.videoWidth > 0 && mpVideo.videoHeight > 0) return true;
+          await new Promise((r) => setTimeout(r, 50));
+        }
+        return false;
+      };
+
+      const ok = await waitReady();
+      if (!ok) {
+        status.innerText = "摄像头启动失败（没有视频尺寸），请重试";
+        return;
+      }
+
+      document.getElementById("loading").style.display = "none";
+      status.innerText = "系统就绪，请伸手";
+
+      // 只启动一次预测循环
+      if (!mpPredictRunning) {
+        mpPredictRunning = true;
+        predictWebcam(mpHandLandmarker, mpVideo);
+      }
+    } catch (err) {
+      console.error("getUserMedia 失败:", err);
+      status.innerText = "无法打开摄像头：请检查权限/浏览器设置";
+    }
+  }
+
+  async function stopCameraStream() {
+    if (mpStream) {
+      try {
+        mpStream.getTracks().forEach((t) => t.stop());
+      } catch {}
+      mpStream = null;
+    }
+    if (mpVideo) {
+      try {
+        mpVideo.pause();
+      } catch {}
+      mpVideo.srcObject = null;
+    }
+  }
+
+  // “重启摄像头”按钮
+  const restartBtn = document.getElementById("restart-camera-btn");
+  if (restartBtn) {
+    restartBtn.onclick = async () => {
+      const status = document.getElementById("status-text");
+      status.innerText = "正在重启摄像头…";
+      await stopCameraStream();
+      // 给浏览器一点时间释放资源（尤其是 iOS）
+      await new Promise((r) => setTimeout(r, 200));
+      await startCameraStream();
+    };
+  }
+
   let lastVideoTime = -1;
   let lastDetectTs = 0;
+
 
   // ======================
   // 手势识别（手机端优化：降频，不要每帧都 detect）
