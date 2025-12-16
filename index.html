@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>BeiChen Christmas v1.4.0</title>
+  <title>BeiChen Christmas v1.5.0</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -189,13 +189,13 @@
       <h1>BeiChen Christmas</h1>
       <div id="status-text">Creating Magic...</div>
       <div class="instructions">
-        <div style="margin-bottom:8px; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:5px; color:#aaa; font-size:0.8rem;">GESTURE CONTROL</div>
-        • <span class="highlight">Fist (握拳)</span> : Build Tree<br/>
-        • <span class="highlight">Palm (张手)</span> : Scatter Stars<br/>
-        • <span class="highlight">Wave (挥动)</span> : Spin Magic<br/>
-        • <span class="highlight">Pinch (捏合)</span> : Grab Memory
+        <div style="margin-bottom:8px; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:5px; color:#aaa; font-size:0.8rem;">控制说明</div>
+        • <span class="highlight">握拳</span> : 圣诞树<br/>
+        • <span class="highlight">张手</span> : 粒子散开<br/>
+        • <span class="highlight">右挥动</span> : 惯性转动<br/>
+        • <span class="highlight">捏合</span> : 选取图片
       </div>
-      <button id="upload-btn" onclick="document.getElementById('file-input').click()">Add Photos</button>
+      <button id="upload-btn" onclick="document.getElementById('file-input').click()">上传图片</button>
       <input type="file" id="file-input" multiple accept="image/*">
     </div>
 
@@ -268,6 +268,10 @@
 
   const QUALITY = { HIGH: 0, MED: 1, LOW: 2 };
   let qualityLevel = QUALITY.HIGH;
+
+  // 手机端默认稍降画质，避免一上来就掉帧
+  const IS_MOBILE = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  if (IS_MOBILE) qualityLevel = QUALITY.MED;
   let fpsAvg = 60, fpsAccum = 0, fpsCount = 0, lastFrameT = performance.now();
 
   const wrapperEl = document.getElementById('canvas-wrapper');
@@ -519,12 +523,146 @@
   function updatePhotos() { photoMeshes.forEach((mesh, idx) => { let targetPos, targetScale = 2.0; if (currentState === STATE.SCATTER) { targetScale = 4.0; mesh.lookAt(camera.position); } if (currentState === STATE.ZOOM && idx === zoomTargetIndex) { const targetWorldPos = new THREE.Vector3(0, 0, 80); targetPos = mainGroup.worldToLocal(targetWorldPos); targetScale = 4.0; mesh.lookAt(camera.position); } else { targetPos = (currentState === STATE.TREE) ? mesh.userData.treePos : mesh.userData.scatterPos; if (currentState !== STATE.TREE) mesh.position.y += Math.sin(time + idx) * 0.01; if (currentState === STATE.TREE) { mesh.rotation.copy(mesh.userData.baseRot); mesh.rotation.y += 0.01; } } const windOffset = new THREE.Vector3(wind.x * 0.06, 0, wind.z * 0.06); mesh.position.lerp(targetPos.clone().add(windOffset), 0.1); mesh.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), 0.1); }); }
   function randomSpherePoint(r) { const u = Math.random(), v = Math.random(); const theta = 2 * Math.PI * u; const phi = Math.acos(2 * v - 1); return new THREE.Vector3(r * Math.sin(phi) * Math.cos(theta), r * Math.sin(phi) * Math.sin(theta), r * Math.cos(phi)); }
   function shuffleArray(arr) { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } }
-  document.getElementById('file-input').addEventListener('change', function(e) { const files = e.target.files; if (!files.length) return; for (let i = 0; i < files.length; i++) { const reader = new FileReader(); reader.onload = function(evt) { const img = new Image(); img.src = evt.target.result; img.onload = () => addPhotoMesh(img); }; reader.readAsDataURL(files[i]); } alert(`已添加 ${files.length} 张照片`); });
-  function addPhotoMesh(img) { const tex = new THREE.Texture(img); tex.needsUpdate = true; tex.colorSpace = THREE.SRGBColorSpace; let w = 4, h = 4; if (img.width > img.height) h = 4 * (img.height / img.width); else w = 4 * (img.width / img.height); const geo = new THREE.PlaneGeometry(w, h); const mat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide, color: 0xcccccc }); const mesh = new THREE.Mesh(geo, mat); const frame = new THREE.Mesh(new THREE.BoxGeometry(w + 0.2, h + 0.2, 0.1), new THREE.MeshPhysicalMaterial({ color: 0xffd700, roughness: 0.2, metalness: 1 })); frame.position.z = -0.06; mesh.add(frame); const h_pos = (Math.random() - 0.5) * CONFIG.treeHeight; const normH = (h_pos + CONFIG.treeHeight/2) / CONFIG.treeHeight; const maxR = CONFIG.maxRadius * (1 - normH); const r = maxR * (0.3 + 0.6 * Math.sqrt(Math.random())); const theta = Math.random() * Math.PI * 2; const treePos = new THREE.Vector3(r * Math.cos(theta), h_pos, r * Math.sin(theta)); const scatterPos = randomSpherePoint(50); mesh.userData = { treePos, scatterPos, baseRot: new THREE.Euler(0, Math.random()*Math.PI, 0) }; mesh.position.copy(treePos); photoMeshes.push(mesh); mainGroup.add(mesh); }
-  async function setupMediaPipe() { const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"); const handLandmarker = await HandLandmarker.createFromOptions(vision, { baseOptions: { modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`, delegate: "GPU" }, runningMode: "VIDEO", numHands: 1 }); const video = document.getElementById("input-video"); navigator.mediaDevices.getUserMedia({ video: true }).then((stream) => { video.srcObject = stream; video.addEventListener("loadeddata", () => { document.getElementById('loading').style.display = 'none'; document.getElementById('status-text').innerText = "系统就绪，请伸手"; predictWebcam(handLandmarker, video); }); }); }
+  
+  // ======================
+  // 上传照片（手机端优化：先缩放/压缩再生成纹理，避免显存爆掉导致卡住）
+  // ======================
+  const MAX_PHOTO_EDGE = 1024;     // 手机端建议 1024（更大容易卡/闪退）
+  const MAX_PHOTOS = 12;           // 给手机留余量（可按需调大）
+
+  document.getElementById('file-input').addEventListener('change', async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+
+    // 简单保护：避免一次性塞太多大图
+    const remain = Math.max(0, MAX_PHOTOS - photoMeshes.length);
+    const picked = files.slice(0, remain);
+
+    const status = document.getElementById('status-text');
+    const prevText = status.innerHTML;
+    status.innerHTML = "正在处理照片… <span style='color:#aaa'>(手机端会自动压缩)</span>";
+
+    for (const file of picked) {
+      try {
+        // 关键：使用 createImageBitmap 直接限制尺寸，减少内存/解码开销
+        const bmp = await createImageBitmap(file, {
+          resizeWidth: MAX_PHOTO_EDGE,
+          resizeHeight: MAX_PHOTO_EDGE,
+          resizeQuality: 'high'
+        });
+
+        const canvas = document.createElement('canvas');
+        canvas.width = bmp.width;
+        canvas.height = bmp.height;
+        const ctx = canvas.getContext('2d', { alpha: false });
+        ctx.drawImage(bmp, 0, 0);
+        bmp.close?.();
+
+        addPhotoMeshFromCanvas(canvas);
+      } catch (err) {
+        console.warn('加载图片失败:', err);
+      }
+    }
+
+    status.innerHTML = prevText;
+    alert(`已添加 ${picked.length} 张照片`);
+    e.target.value = ''; // 允许重复选同一张
+  });
+
+  // 从 Canvas 创建贴图（比 dataURL + Image 更省内存）
+  function addPhotoMeshFromCanvas(canvas) {
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+
+    // ✅ 关键：关闭 mipmap 并用线性采样（移动端显存压力小很多）
+    tex.generateMipmaps = false;
+    tex.minFilter = THREE.LinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+
+    // 保持你原来的“照片牌”尺寸策略
+    let w = 4, h = 4;
+    const iw = canvas.width || 1;
+    const ih = canvas.height || 1;
+    if (iw > ih) h = 4 * (ih / iw);
+    else w = 4 * (iw / ih);
+
+    const geo = new THREE.PlaneGeometry(w, h);
+    const mat = new THREE.MeshBasicMaterial({
+      map: tex,
+      side: THREE.DoubleSide,
+      color: 0xcccccc
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+
+    // 金色相框
+    const frame = new THREE.Mesh(
+      new THREE.BoxGeometry(w + 0.2, h + 0.2, 0.1),
+      new THREE.MeshPhysicalMaterial({ color: 0xffd700, roughness: 0.2, metalness: 1 })
+    );
+    frame.position.z = -0.06;
+    mesh.add(frame);
+
+    // 挂在树上的随机位置（沿用你原逻辑）
+    const h_pos = (Math.random() - 0.5) * CONFIG.treeHeight;
+    const normH = (h_pos + CONFIG.treeHeight / 2) / CONFIG.treeHeight;
+    const maxR = CONFIG.maxRadius * (1 - normH);
+    const r = maxR * (0.3 + 0.6 * Math.sqrt(Math.random()));
+    const theta = Math.random() * Math.PI * 2;
+
+    const treePos = new THREE.Vector3(r * Math.cos(theta), h_pos, r * Math.sin(theta));
+    const scatterPos = randomSpherePoint(50);
+
+    mesh.userData = {
+      treePos,
+      scatterPos,
+      baseRot: new THREE.Euler(0, Math.random() * Math.PI, 0)
+    };
+    mesh.position.copy(treePos);
+
+    photoMeshes.push(mesh);
+    mainGroup.add(mesh);
+  }
+
+async function setupMediaPipe() { const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"); const handLandmarker = await HandLandmarker.createFromOptions(vision, { baseOptions: { modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`, delegate: "GPU" }, runningMode: "VIDEO", numHands: 1 }); const video = document.getElementById("input-video"); navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30, max: 30 } } }).then((stream) => { video.srcObject = stream; video.addEventListener("loadeddata", () => { document.getElementById('loading').style.display = 'none'; document.getElementById('status-text').innerText = "系统就绪，请伸手"; predictWebcam(handLandmarker, video); }); }); }
+  
   let lastVideoTime = -1;
-  async function predictWebcam(handLandmarker, video) { if (video.currentTime !== lastVideoTime) { lastVideoTime = video.currentTime; const result = handLandmarker.detectForVideo(video, performance.now()); const canvas = document.getElementById('skeleton-canvas'); const ctx = canvas.getContext('2d'); canvas.width = video.videoWidth; canvas.height = video.videoHeight; ctx.clearRect(0, 0, canvas.width, canvas.height); if (result.landmarks && result.landmarks.length > 0) { const landmarks = result.landmarks[0]; isHandPresent = true; drawSkeleton(ctx, landmarks, canvas.width, canvas.height); handleGesture(landmarks); } else { isHandPresent = false; } } requestAnimationFrame(() => predictWebcam(handLandmarker, video)); }
-  function drawSkeleton(ctx, landmarks, w, h) { ctx.lineWidth = 3; ctx.strokeStyle = '#00ff88'; ctx.fillStyle = '#ff0044'; const connections = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]]; ctx.beginPath(); for (let i = 0; i < connections.length; i++) { const s = landmarks[connections[i][0]]; const e = landmarks[connections[i][1]]; ctx.moveTo(s.x * w, s.y * h); ctx.lineTo(e.x * w, e.y * h); } ctx.stroke(); for (let i = 0; i < landmarks.length; i++) { ctx.beginPath(); ctx.arc(landmarks[i].x * w, landmarks[i].y * h, 4, 0, Math.PI * 2); ctx.fill(); } }
+  let lastDetectTs = 0;
+
+  // ======================
+  // 手势识别（手机端优化：降频，不要每帧都 detect）
+  // ======================
+  async function predictWebcam(handLandmarker, video) {
+    const now = performance.now();
+
+    // 约 15fps 做一次识别，摄像头预览更稳
+    const SHOULD_DETECT = (now - lastDetectTs) >= 66;
+
+    if (SHOULD_DETECT && video.currentTime !== lastVideoTime) {
+      lastDetectTs = now;
+      lastVideoTime = video.currentTime;
+
+      const result = handLandmarker.detectForVideo(video, now);
+
+      const canvas = document.getElementById('skeleton-canvas');
+      const ctx = canvas.getContext('2d');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      if (result.landmarks && result.landmarks.length > 0) {
+        const landmarks = result.landmarks[0];
+        isHandPresent = true;
+        drawSkeleton(ctx, landmarks, canvas.width, canvas.height);
+        handleGesture(landmarks);
+      } else {
+        isHandPresent = false;
+      }
+    }
+
+    requestAnimationFrame(() => predictWebcam(handLandmarker, video));
+  }
+
+function drawSkeleton(ctx, landmarks, w, h) { ctx.lineWidth = 3; ctx.strokeStyle = '#00ff88'; ctx.fillStyle = '#ff0044'; const connections = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]]; ctx.beginPath(); for (let i = 0; i < connections.length; i++) { const s = landmarks[connections[i][0]]; const e = landmarks[connections[i][1]]; ctx.moveTo(s.x * w, s.y * h); ctx.lineTo(e.x * w, e.y * h); } ctx.stroke(); for (let i = 0; i < landmarks.length; i++) { ctx.beginPath(); ctx.arc(landmarks[i].x * w, landmarks[i].y * h, 4, 0, Math.PI * 2); ctx.fill(); } }
   function handleGesture(landmarks) { const palmX = 1 - (landmarks[0].x + landmarks[9].x) / 2; const palmY = (landmarks[0].y + landmarks[9].y) / 2; handPos.x = handPos.x * 0.8 + palmX * 0.2; handPos.y = handPos.y * 0.8 + palmY * 0.2; let folded = 0; [8,12,16,20].forEach(i => { const d = Math.sqrt(Math.pow(landmarks[i].x - landmarks[0].x, 2) + Math.pow(landmarks[i].y - landmarks[0].y, 2)); if (d < 0.35) folded++; }); const dPinch = Math.sqrt(Math.pow(landmarks[4].x - landmarks[8].x, 2) + Math.pow(landmarks[4].y - landmarks[8].y, 2)); const isPinch = dPinch < 0.1; const isFist = folded >= 4; const isOpen = !isFist && !isPinch; const status = document.getElementById('status-text'); if (isPinch && currentState === STATE.SCATTER) { if (photoMeshes.length > 0) { currentState = STATE.ZOOM; status.innerHTML = "状态: <span style='color:#ffd700'>抓取照片</span>"; if (zoomTargetIndex === -1 && photoMeshes.length > 0) { let minDist = Infinity, bestIdx = 0; const camPos = camera.position; const worldPos = new THREE.Vector3(); photoMeshes.forEach((mesh, idx) => { mesh.getWorldPosition(worldPos); const d = worldPos.distanceTo(camPos); if (d < minDist) { minDist = d; bestIdx = idx; } }); zoomTargetIndex = bestIdx; } } else { status.innerHTML = "状态: <span style='color:#aaa'>请先上传照片</span>"; } } else if (isFist) { currentState = STATE.TREE; zoomTargetIndex = -1; rotationVelocity.x = 0; rotationVelocity.y = 0; status.innerHTML = "状态: <span style='color:#00ff00'>圣诞树</span>"; } else if (isOpen) { if (currentState === STATE.ZOOM && !isPinch) { currentState = STATE.SCATTER; zoomTargetIndex = -1; } else if (currentState === STATE.TREE) { currentState = STATE.SCATTER; lastHandPos.x = handPos.x; lastHandPos.y = handPos.y; } status.innerHTML = "状态: <span style='color:#00aaff'>粒子散开</span>"; } }
 
   initThree();
@@ -533,5 +671,4 @@
   applyQuality();
 </script>
 </body>
-
 </html>
